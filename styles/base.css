@@ -264,26 +264,3 @@ a {
   .xl\:text-6xl { font-size: calc(60px*var(--app-text-scale,1)); }
 }
 
-/* 1. 限制全域寬度，防止橫向溢出與滾動 */
-html, body {
-  max-width: 100vw !important;
-  overflow-x: hidden !important;
-}
-
-/* 2. 強制所有元素尺寸自適應，不超出螢幕 */
-*, *::before, *::after {
-  max-width: 100% !important;
-  box-sizing: border-box !important;
-}
-
-/* 3. 針對手機端（寬度小於 768px）：重置手機外框與容器尺寸 */
-@media (max-width: 768px) {
-  body, main, #__next, [class*="container"], [class*="phone"], [class*="mockup"] {
-    width: 100% !important;
-    min-width: unset !important;
-    transform: none !important;
-    border: none !important;
-    border-radius: 0 !important;
-    box-shadow: none !important;
-  }
-                                   }
