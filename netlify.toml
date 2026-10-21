@@ -55,6 +55,17 @@ try {
   const safeErrors = ["missing_server_environment", "local_handler_start_failed", "unauthorized_check_failed", "authorized_get_failed", "duplicate_check_failed", "duplicate_check_invalid", "post_failed_do_not_retry_automatically"];
   result.passed = false;
   result.error = safeErrors.includes(error?.message) ? error.message : "request_or_validation_failed_details_redacted";
+  try {
+    const diagnosticUrl = new URL("/rest/v1/ai_shared_memories?select=id&limit=1", process.env.AIWEN_SUPABASE_URL);
+    result.supabase_project_matches_expected = diagnosticUrl.hostname === "fuzjocsaqsfonuxsfoqy.supabase.co";
+    const diagnostic = await fetch(diagnosticUrl, { headers: { apikey: process.env.AIWEN_SUPABASE_SERVICE_ROLE_KEY, Authorization: "Bearer " + process.env.AIWEN_SUPABASE_SERVICE_ROLE_KEY }, signal: AbortSignal.timeout(15000) });
+    result.supabase_http = diagnostic.status;
+    const diagnosticData = await diagnostic.json();
+    const knownCodes = ["PGRST205", "PGRST204", "PGRST301", "PGRST302", "PGRST303", "42P01", "42703", "42501", "28P01"];
+    result.supabase_error_code = knownCodes.includes(diagnosticData?.code) ? diagnosticData.code : "not_reported_or_redacted";
+    const message = String(diagnosticData?.message || "").toLowerCase();
+    result.supabase_error_category = message.includes("invalid api key") ? "invalid_api_key" : message.includes("jwt") ? "jwt_authentication" : message.includes("schema cache") ? "schema_cache_or_missing_table" : message.includes("permission") ? "permission_denied" : "not_classified";
+  } catch { result.supabase_diagnostic = "request_failed_details_redacted"; }
 } finally {
   child?.kill("SIGTERM");
   console.log("AIWEN_ACCEPTANCE_RESULT " + JSON.stringify(result));
