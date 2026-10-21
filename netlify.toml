@@ -1,5 +1,77 @@
 [build]
-  command = "npm run build"
+  command = '''
+npm run build && node --input-type=module <<'AIWEN_VERIFY'
+import { spawn } from "node:child_process";
+const marker = "[AIWEN_ACCEPTANCE_20261021_4ea57ba] temporary integration test; safe to retain";
+const result = { marker: "AIWEN_ACCEPTANCE_20261021_4ea57ba", scope: "Netlify build loopback; production handler and Supabase", inserted: false };
+let child;
+try {
+  for (const name of ["AIWEN_SHARED_SECRET", "AIWEN_SUPABASE_URL", "AIWEN_SUPABASE_SERVICE_ROLE_KEY"]) {
+    if (!process.env[name]) throw new Error("missing_server_environment");
+  }
+  child = spawn(process.execPath, ["node_modules/next/dist/bin/next", "start", "-p", "4117", "-H", "127.0.0.1"], { stdio: "ignore" });
+  const endpoint = "http://127.0.0.1:4117/api/aiwen-memory";
+  let unauth;
+  for (let attempt = 0; attempt < 40; attempt++) {
+    try { unauth = await fetch(endpoint, { signal: AbortSignal.timeout(1000) }); break; }
+    catch { await new Promise(resolve => setTimeout(resolve, 500)); }
+  }
+  if (!unauth) throw new Error("local_handler_start_failed");
+  result.unauthorized_http = unauth.status;
+  result.unauthorized_json = (await unauth.json()).error === "Unauthorized";
+  if (result.unauthorized_http !== 401 || !result.unauthorized_json) throw new Error("unauthorized_check_failed");
+  const headers = { Authorization: "Bearer " + process.env.AIWEN_SHARED_SECRET };
+  const before = await fetch(endpoint, { headers, signal: AbortSignal.timeout(15000) });
+  result.get_http = before.status;
+  const beforeData = await before.json();
+  if (before.status !== 200 || !Array.isArray(beforeData.memories)) throw new Error("authorized_get_failed");
+  result.get_result = { memories_count: beforeData.memories.length, content: "redacted" };
+  const checkUrl = new URL("/rest/v1/ai_shared_memories", process.env.AIWEN_SUPABASE_URL);
+  checkUrl.searchParams.set("character_id", "eq.aiwen_test");
+  checkUrl.searchParams.set("content", "eq." + marker);
+  checkUrl.searchParams.set("select", "id");
+  checkUrl.searchParams.set("limit", "2");
+  const check = await fetch(checkUrl, { headers: { apikey: process.env.AIWEN_SUPABASE_SERVICE_ROLE_KEY, Authorization: "Bearer " + process.env.AIWEN_SUPABASE_SERVICE_ROLE_KEY }, signal: AbortSignal.timeout(15000) });
+  result.duplicate_check_http = check.status;
+  if (!check.ok) throw new Error("duplicate_check_failed");
+  const existing = await check.json();
+  if (!Array.isArray(existing)) throw new Error("duplicate_check_invalid");
+  if (existing.length) {
+    result.post_skipped = "marked_record_already_exists";
+  } else {
+    const post = await fetch(endpoint, { method: "POST", headers: { ...headers, "Content-Type": "application/json" }, body: JSON.stringify({ content: marker, memory_type: "event" }), signal: AbortSignal.timeout(15000) });
+    result.post_http = post.status;
+    const postData = await post.json();
+    result.post_result = { success: postData.success === true, returned_count: Array.isArray(postData.memories) ? postData.memories.length : 0, content: "test_marker_only" };
+    if (post.status !== 200 || postData.success !== true || postData.memories?.length !== 1 || postData.memories[0].content !== marker) throw new Error("post_failed_do_not_retry_automatically");
+    result.inserted = true;
+  }
+  const after = await fetch(endpoint, { headers, signal: AbortSignal.timeout(15000) });
+  result.readback_http = after.status;
+  const afterData = await after.json();
+  result.readback_match = after.status === 200 && Array.isArray(afterData.memories) && afterData.memories.some(memory => memory.content === marker && memory.source === "float" && memory.memory_type === "event");
+  result.passed = result.readback_match === true;
+} catch (error) {
+  const safeErrors = ["missing_server_environment", "local_handler_start_failed", "unauthorized_check_failed", "authorized_get_failed", "duplicate_check_failed", "duplicate_check_invalid", "post_failed_do_not_retry_automatically"];
+  result.passed = false;
+  result.error = safeErrors.includes(error?.message) ? error.message : "request_or_validation_failed_details_redacted";
+  try {
+    const diagnosticUrl = new URL("/rest/v1/ai_shared_memories?select=id&limit=1", process.env.AIWEN_SUPABASE_URL);
+    result.supabase_project_matches_expected = diagnosticUrl.hostname === "fuzjocsaqsfonuxsfoqy.supabase.co";
+    const diagnostic = await fetch(diagnosticUrl, { headers: { apikey: process.env.AIWEN_SUPABASE_SERVICE_ROLE_KEY, Authorization: "Bearer " + process.env.AIWEN_SUPABASE_SERVICE_ROLE_KEY }, signal: AbortSignal.timeout(15000) });
+    result.supabase_http = diagnostic.status;
+    const diagnosticData = await diagnostic.json();
+    const knownCodes = ["PGRST205", "PGRST204", "PGRST301", "PGRST302", "PGRST303", "42P01", "42703", "42501", "28P01"];
+    result.supabase_error_code = knownCodes.includes(diagnosticData?.code) ? diagnosticData.code : "not_reported_or_redacted";
+    const message = String(diagnosticData?.message || "").toLowerCase();
+    result.supabase_error_category = message.includes("invalid api key") ? "invalid_api_key" : message.includes("jwt") ? "jwt_authentication" : message.includes("schema cache") ? "schema_cache_or_missing_table" : message.includes("permission") ? "permission_denied" : "not_classified";
+  } catch { result.supabase_diagnostic = "request_failed_details_redacted"; }
+} finally {
+  child?.kill("SIGTERM");
+  console.log("AIWEN_ACCEPTANCE_RESULT " + JSON.stringify(result));
+}
+AIWEN_VERIFY
+'''
   publish = ".next"
 
 [[plugins]]
