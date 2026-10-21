@@ -6,6 +6,8 @@ import { verifyAccountGateCookieValue } from "./lib/account-gate-cookie";
 import { isSelfHostedModeEnabled } from "./lib/self-hosting";
 
 const PUBLIC_ROUTE_PREFIXES = [
+  // Cross-platform clients authenticate in this handler with AIWEN_SHARED_SECRET.
+  "/api/aiwen-memory/",
   "/verify",
   "/api/auth/",
   "/api/verify/",
