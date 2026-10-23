@@ -344,6 +344,7 @@ export type DebugPromptRequestOptions = {
     appId?: string;
     appTags?: string[];
     debugSessionId?: string;
+    sensitivePromptContext?: boolean;
 };
 
 type ChatPromptBuildOptions = {
@@ -362,6 +363,7 @@ type ChatPromptBuildOptions = {
     activateAllWorldBooks?: boolean;
     toolsAllowed?: boolean;
     forceEnableTools?: boolean;
+    ephemeralSharedMemory?: string;
 };
 
 function matchesPromptProfileRef(prompt: { identifier: string; name?: string }, refs: Set<string>): boolean {
@@ -539,7 +541,7 @@ export function publishDebugPromptSnapshot(params: {
         sessionId: options?.debugSessionId,
         characterName: meta?.characterName,
         presetName: preset?.name || "默认预设",
-        messages: debugMessagesFromRequest(request),
+        messages: options?.sensitivePromptContext ? [] : debugMessagesFromRequest(request),
         tools: tools?.map(tool => ({ name: tool.name, description: tool.description })),
     };
     if (typeof window !== "undefined") setDebugPromptSnapshot(snapshot);
@@ -797,6 +799,7 @@ export async function sendLLMStreamRequest(
         followUpCount?: number;
         debugSessionId?: string;
         signal?: AbortSignal;
+        sensitivePromptContext?: boolean;
     },
     callbacks?: ChatCompletionStreamCallbacks,
 ): Promise<ChatCompletionStreamResult> {
@@ -844,18 +847,20 @@ export async function sendLLMStreamRequest(
 
         // Store API log entry — mirror sendLLMRequest so streaming calls also show up
         // in the "底层调用大模型日志" panel. reasoning 单独存思维链原文，供「查看原始」直接展示。
-        const sanitizedMessages = request.messagesForLog.map(m => ({
-            ...m,
-            content: typeof m.content === "string" ? m.content : "[vision: 含图片的多模态消息]",
-        }));
-        pushApiLog({
-            characterName: meta?.characterName,
-            ...apiLogChannelFor(options),
-            model: config.defaultModel,
-            messages: sanitizedMessages,
-            rawResponse: rawOutput,
-            reasoning: streamedReasoning.trim() || undefined,
-        });
+        if (!options?.sensitivePromptContext) {
+            const sanitizedMessages = request.messagesForLog.map(m => ({
+                ...m,
+                content: typeof m.content === "string" ? m.content : "[vision: 含图片的多模态消息]",
+            }));
+            pushApiLog({
+                characterName: meta?.characterName,
+                ...apiLogChannelFor(options),
+                model: config.defaultModel,
+                messages: sanitizedMessages,
+                rawResponse: rawOutput,
+                reasoning: streamedReasoning.trim() || undefined,
+            });
+        }
 
         if (!options?.skipOutputRegex) {
             const macroEngine = new MacroEngine(meta?.characterName ?? "", meta?.userName ?? "用户");
@@ -900,6 +905,7 @@ export async function sendLLMRequest(
         followUpCount?: number;
         debugSessionId?: string;
         signal?: AbortSignal;
+        sensitivePromptContext?: boolean;
     },
 ): Promise<string> {
     const pluginPurpose = options?.appId ?? "chat";
@@ -977,20 +983,22 @@ export async function sendLLMRequest(
         }
 
         // Store API log entry (strip base64 image data to avoid bloating localStorage)
-        const sanitizedMessages = request.messagesForLog.map(m => ({
-            ...m,
-            content: typeof m.content === "string" ? m.content : "[vision: 含图片的多模态消息]",
-        }));
-        pushApiLog({
-            characterName: meta?.characterName,
-            ...apiLogChannelFor(options),
-            model: config.defaultModel,
-            messages: sanitizedMessages,
-            rawResponse: rawOutput,
-            usage: parsed.usage,
-            // 思维链只经 onReasoning 回调透传，之前没进日志；这里单独存一份原文
-            reasoning: parsed.reasoning || undefined,
-        });
+        if (!options?.sensitivePromptContext) {
+            const sanitizedMessages = request.messagesForLog.map(m => ({
+                ...m,
+                content: typeof m.content === "string" ? m.content : "[vision: 含图片的多模态消息]",
+            }));
+            pushApiLog({
+                characterName: meta?.characterName,
+                ...apiLogChannelFor(options),
+                model: config.defaultModel,
+                messages: sanitizedMessages,
+                rawResponse: rawOutput,
+                usage: parsed.usage,
+                // 思维链只经 onReasoning 回调透传，之前没进日志；这里单独存一份原文
+                reasoning: parsed.reasoning || undefined,
+            });
+        }
 
         if (options?.skipOutputRegex) {
             return rawOutput;
@@ -1092,6 +1100,7 @@ export async function sendLLMToolStreamRequest(
         followUpCount?: number;
         debugSessionId?: string;
         signal?: AbortSignal;
+        sensitivePromptContext?: boolean;
         /** 单次最大输出 token：按调用覆盖预设值（工坊输出护栏用） */
         maxTokens?: number;
     },
@@ -1193,20 +1202,22 @@ export async function sendLLMToolStreamRequest(
         }
         content = await applyChatPluginLlmResponse(content, pluginPurpose, options?.debugSessionId);
 
-        const sanitizedMessages = request.messagesForLog.map(m => ({
-            ...m,
-            content: typeof m.content === "string" ? m.content : "[vision: 含图片的多模态消息]",
-        }));
         const { calls: toolCalls, truncatedNames } = finalizeStreamToolCalls(toolDrafts);
         const logEntryRaw = JSON.stringify({ content, reasoning, toolCalls, raw: rawResponse });
-        pushApiLog({
-            characterName: meta?.characterName,
-            ...apiLogChannelFor(options),
-            model: config.defaultModel,
-            messages: sanitizedMessages,
-            rawResponse: logEntryRaw,
-            reasoning: reasoning || undefined,
-        });
+        if (!options?.sensitivePromptContext) {
+            const sanitizedMessages = request.messagesForLog.map(m => ({
+                ...m,
+                content: typeof m.content === "string" ? m.content : "[vision: 含图片的多模态消息]",
+            }));
+            pushApiLog({
+                characterName: meta?.characterName,
+                ...apiLogChannelFor(options),
+                model: config.defaultModel,
+                messages: sanitizedMessages,
+                rawResponse: logEntryRaw,
+                reasoning: reasoning || undefined,
+            });
+        }
 
         if (!content && toolCalls.length === 0 && truncatedNames.length === 0) {
             throw new ChatEngineError("原生动作流式响应没有解析到文本或动作。");
@@ -1250,6 +1261,7 @@ export async function sendLLMToolRequest(
         followUpCount?: number;
         debugSessionId?: string;
         signal?: AbortSignal;
+        sensitivePromptContext?: boolean;
     },
 ): Promise<LLMToolRequestResult> {
     const pluginPurpose = options?.appId ?? "chat";
@@ -1290,10 +1302,6 @@ export async function sendLLMToolRequest(
             throw new ChatEngineError(emptyDetails.message);
         }
 
-        const sanitizedMessages = request.messagesForLog.map(m => ({
-            ...m,
-            content: typeof m.content === "string" ? m.content : "[vision: 含图片的多模态消息]",
-        }));
         const rawResponse = JSON.stringify({
             content: parsed.content,
             reasoning: parsed.reasoning,
@@ -1301,14 +1309,20 @@ export async function sendLLMToolRequest(
             toolCalls: parsed.toolCalls,
             raw: parsed.raw,
         });
-        pushApiLog({
-            characterName: meta?.characterName,
-            ...apiLogChannelFor(options),
-            model: config.defaultModel,
-            messages: sanitizedMessages,
-            rawResponse,
-            usage: parsed.usage,
-        });
+        if (!options?.sensitivePromptContext) {
+            const sanitizedMessages = request.messagesForLog.map(m => ({
+                ...m,
+                content: typeof m.content === "string" ? m.content : "[vision: 含图片的多模态消息]",
+            }));
+            pushApiLog({
+                characterName: meta?.characterName,
+                ...apiLogChannelFor(options),
+                model: config.defaultModel,
+                messages: sanitizedMessages,
+                rawResponse,
+                usage: parsed.usage,
+            });
+        }
 
         if (!options?.skipOutputRegex && rawOutput) {
             const macroEngine = new MacroEngine(meta?.characterName ?? "", meta?.userName ?? "用户");
@@ -2125,6 +2139,10 @@ async function generateNativeChatCompletion(
     };
     let nativeBundle = buildNativeChatTools(enabledTools, expandedSourceIds, nativeToolBuildOptions);
     const requestMessages: LlmRequestMessage[] = toLlmRequestMessages(llmMessages);
+    const sharedMemoryPrompt = options?.ephemeralSharedMemory?.trim();
+    const continuationRequestMessages = sharedMemoryPrompt
+        ? requestMessages.filter(message => !(message.role === "system" && message.content === sharedMemoryPrompt))
+        : requestMessages;
     const parts: ChatCompletionPart[] = [];
     const meta = { characterName: character.name, userName: userIdentity?.name };
     const actionContext = { characterId: session.contactId, sessionId: session.id, sourceEngine: "chat" as const, signal: options?.signal };
@@ -2151,6 +2169,7 @@ async function generateNativeChatCompletion(
                         followUpCount: options?.followUpCount,
                         debugSessionId: session.id,
                         signal: options?.signal,
+                        sensitivePromptContext: Boolean(options?.ephemeralSharedMemory),
                     },
                     {
                         onDelta: (text) => callbacks?.onStreamDelta?.(text),
@@ -2174,6 +2193,7 @@ async function generateNativeChatCompletion(
                         followUpCount: options?.followUpCount,
                         debugSessionId: session.id,
                         signal: options?.signal,
+                        sensitivePromptContext: Boolean(options?.ephemeralSharedMemory),
                     },
                 );
             }
@@ -2260,7 +2280,7 @@ async function generateNativeChatCompletion(
                             ? `__FLOAT_SHORTCUT_IMAGE_${command.id}__`
                             : undefined;
                         const snapshotMessages: LlmRequestMessage[] = [
-                            ...requestMessages,
+                            ...continuationRequestMessages,
                             {
                                 role: "assistant",
                                 content: assistantForToolContext,
@@ -2562,6 +2582,14 @@ async function generateChatCompletionCore(
         }).catch(() => undefined);
     }
 
+    const ephemeralSharedMemoryPrompt = options?.ephemeralSharedMemory?.trim();
+    if (ephemeralSharedMemoryPrompt) {
+        // Inject only after the offline bailout snapshot has been made. The shared
+        // memory is never sent to the server-side bailout or stored in chat history.
+        llmMessages.unshift({ role: "system", content: ephemeralSharedMemoryPrompt });
+    }
+    const sensitivePromptContext = Boolean(ephemeralSharedMemoryPrompt);
+
     if (toolsEnabled && nativeToolProtocolForConfig(config) && getEnabledTools(options?.appId ?? "chat").length > 0) {
         return generateNativeChatCompletion({
             session,
@@ -2601,6 +2629,7 @@ async function generateChatCompletionCore(
                     followUpCount: options?.followUpCount,
                     debugSessionId: session.id,
                     signal: options?.signal,
+                    sensitivePromptContext,
                 }, {
                     onDelta: (text) => callbacks?.onStreamDelta?.(text),
                     // 流式下 onReasoningDelta 是单段增量：累积后再喂 onReasoning（保持整段请求语义）
@@ -2615,6 +2644,7 @@ async function generateChatCompletionCore(
                     followUpCount: options?.followUpCount,
                     debugSessionId: session.id,
                     signal: options?.signal,
+                    sensitivePromptContext,
                     // 预设开启「线上标签解析」时不透传原生思维链（改由下方标签提取）
                     onReasoning: onlineThinking.enabled ? undefined : callbacks?.onReasoning,
                 });
@@ -2738,7 +2768,9 @@ async function generateChatCompletionCore(
                         const imageMarker = wantsImage && config.enableImageRecognition
                             ? `__FLOAT_SHORTCUT_IMAGE_${command.id}__`
                             : undefined;
-                        const snapshotMessages = [...llmMessages];
+                        const snapshotMessages = ephemeralSharedMemoryPrompt
+                            ? llmMessages.filter(message => !(message.role === "system" && message.content === ephemeralSharedMemoryPrompt))
+                            : [...llmMessages];
                         const insertions: LLMMessage[] = [
                             { role: "assistant", content: assistantForToolContext, _debugMeta: { _fromHistory: true } },
                             { role: "user", content: resultMarker, _debugMeta: { _fromHistory: true } },
