@@ -15,6 +15,7 @@ import { EmojiPanel, StickerPanel } from "./emoji-panel";
 import { StickerSearchSuggest } from "./sticker-search-suggest";
 import { StateValuesPanel } from "./state-values-panel";
 import { generateChatCompletion, generateOfflineChatCompletion, flattenCompletionResult, ChatEngineError } from "@/lib/chat-engine";
+import { createAiwenSharedMemoryPrompt, loadAiwenSharedEventMemories } from "@/lib/aiwen-shared-memory";
 import { formatOfflineTurnXml as formatOfflineTurnXmlShared, buildOfflinePromptHistory as buildOfflinePromptHistoryShared } from "@/lib/offline-prompt-builder";
 import { getStatusRegionConfig, isCustomStatusRegionActive } from "@/lib/chat-status-region";
 import { CustomStatusFrame } from "@/components/chat/custom-status-frame";
@@ -3570,6 +3571,16 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
         streamAccumRef.current = "";
         setStreamPreview(null);
         try {
+            let sharedMemoryContext: string | undefined;
+            if (!offlineMode && !session.isGroup && session.contactId === "aiwen_test") {
+                try {
+                    const memories = await loadAiwenSharedEventMemories();
+                    const context = createAiwenSharedMemoryPrompt(memories);
+                    if (context) sharedMemoryContext = context;
+                } catch {
+                    // Shared memory is optional. Keep the normal reply path available on any read failure.
+                }
+            }
             const latestMessages = loadChatMessages(session.id);
             if (session.isGroup) {
                 const streamedImageReplacementTasks: Promise<unknown>[] = [];
@@ -3751,6 +3762,7 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
                 const result = await generateChatCompletion(session, latestMessages, {
                     appTags: theaterMode ? ["chat"] : ["chat", "text"],
                     signal: generationRun.controller.signal,
+                    ephemeralSharedMemory: sharedMemoryContext,
                 }, {
                     onReasoning: (t) => { pendingReasoning = t; },
                     onStreamDelta: (delta) => {
